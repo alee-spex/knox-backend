@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+watchpower-api
+python-dotenv
+requests
