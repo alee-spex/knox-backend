@@ -1,4 +1,5 @@
 import os
+import hashlib
 import traceback
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,39 +28,27 @@ def get_wp():
     if _wp is not None:
         return _wp
     if not WP_USER or not WP_PASS:
-        raise HTTPException(
-            status_code=503,
-            detail="WatchPower credentials not configured. Set WP_USER and WP_PASS."
-        )
+        raise HTTPException(status_code=503, detail="Credentials not configured.")
     try:
         from watchpower_api import WatchPowerAPI
-        # ── CORRECT usage: no constructor args, login() called separately ──
         client = WatchPowerAPI()
         client.login(WP_USER, WP_PASS)
         _wp = client
         return _wp
     except ImportError:
-        raise HTTPException(
-            status_code=503,
-            detail="watchpower_api package not installed. Add it to requirements.txt."
-        )
+        raise HTTPException(status_code=503, detail="watchpower_api not installed.")
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"WatchPower login failed: {e}")
+        raise HTTPException(status_code=503, detail=f"Login failed: {e}")
 
 
 class PriorityRequest(BaseModel):
-    output: str   # SBU | SUB | UTI
-    charger: str  # OSO | OSE | OSU
+    output: str
+    charger: str
 
 
 @app.get("/")
 def root():
-    return {
-        "status": "Knox backend is live",
-        "device": DEVICE_SN,
-        "wp_user_set": bool(WP_USER),
-        "wp_pass_set": bool(WP_PASS),
-    }
+    return {"status": "Knox backend is live", "device": DEVICE_SN}
 
 
 @app.get("/health")
@@ -74,11 +63,13 @@ def health():
 
 @app.get("/debug")
 def debug():
-    """Diagnostic endpoint — visit /debug to see exactly what is failing."""
+    """Full diagnostic — shows login attempt details and raw API response."""
     result = {
         "env": {
-            "WP_USER_set": bool(WP_USER),
-            "WP_PASS_set": bool(WP_PASS),
+            "WP_USER": WP_USER,                          # show username (safe)
+            "WP_PASS_length": len(WP_PASS) if WP_PASS else 0,
+            "WP_PASS_md5": hashlib.md5(WP_PASS.encode()).hexdigest() if WP_PASS else None,
+            "WP_PASS_has_spaces": WP_PASS != WP_PASS.strip() if WP_PASS else False,
             "DEVICE_SN": DEVICE_SN,
         },
         "wp_login": None,
@@ -86,17 +77,30 @@ def debug():
         "error": None,
         "traceback": None,
     }
+
+    # Try 1: login with password as-is
     try:
         from watchpower_api import WatchPowerAPI
         client = WatchPowerAPI()
         client.login(WP_USER, WP_PASS)
-        result["wp_login"] = "success"
-    except Exception as e:
-        result["wp_login"] = "failed"
-        result["error"] = str(e)
-        result["traceback"] = traceback.format_exc()
-        return result
+        result["wp_login"] = "success (plain password)"
+    except Exception as e1:
+        result["wp_login"] = f"failed plain: {e1}"
 
+        # Try 2: login with MD5-hashed password (some WatchPower versions require this)
+        try:
+            md5_pass = hashlib.md5(WP_PASS.encode()).hexdigest()
+            client2 = WatchPowerAPI()
+            client2.login(WP_USER, md5_pass)
+            result["wp_login"] = "success (MD5 hashed password)"
+            client = client2
+        except Exception as e2:
+            result["wp_login_md5"] = f"failed md5: {e2}"
+            result["error"] = str(e1)
+            result["traceback"] = traceback.format_exc()
+            return result
+
+    # If login worked, try get_device_status
     try:
         raw = client.get_device_status(DEVICE_SN)
         result["raw_status"] = raw
@@ -127,9 +131,9 @@ def set_priority(req: PriorityRequest):
     valid_charger = ["OSO", "OSE", "OSU"]
 
     if req.output not in valid_output:
-        raise HTTPException(status_code=400, detail=f"Invalid output priority: {req.output}")
+        raise HTTPException(status_code=400, detail=f"Invalid output: {req.output}")
     if req.charger not in valid_charger:
-        raise HTTPException(status_code=400, detail=f"Invalid charger priority: {req.charger}")
+        raise HTTPException(status_code=400, detail=f"Invalid charger: {req.charger}")
     if not DEVICE_SN:
         raise HTTPException(status_code=503, detail="DEVICE_SN not set.")
 
@@ -137,7 +141,6 @@ def set_priority(req: PriorityRequest):
         wp = get_wp()
         wp.set_output_priority(DEVICE_SN, req.output)
         wp.set_charger_priority(DEVICE_SN, req.charger)
-        print(f"[Knox] Set output={req.output}, charger={req.charger}")
         return {"ok": True, "output": req.output, "charger": req.charger}
     except HTTPException:
         raise
