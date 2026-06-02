@@ -24,7 +24,7 @@ DESS_SECRET = os.getenv("DESS_SECRET")
 DESS_TOKEN  = os.getenv("DESS_TOKEN")
 DESS_PN     = os.getenv("DESS_PN")
 DESS_SN     = os.getenv("DESS_SN")
-DESS_DEVCODE = os.getenv("DESS_DEVCODE", "2429")  # default, may need updating
+DESS_DEVCODE = os.getenv("DESS_DEVCODE", "6443")  # Knox Hybrid devcode
 DESS_DEVADDR = os.getenv("DESS_DEVADDR", "1")
 
 DESS_API = "https://web.dessmonitor.com/public/"
