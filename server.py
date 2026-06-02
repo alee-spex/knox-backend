@@ -21,8 +21,8 @@ WP_PASS   = os.getenv("WP_PASS")
 DEVICE_SN = os.getenv("DEVICE_SN")
 
 # ── Uncomment these lines once watchpower-api is confirmed working ──
-# from watchpower_api import WatchPowerAPI
-# wp = WatchPowerAPI(WP_USER, WP_PASS)
+from watchpower_api import WatchPowerAPI
+wp = WatchPowerAPI(WP_USER, WP_PASS)
 
 class PriorityRequest(BaseModel):
     output: str   # SBU | SUB | UTI
@@ -36,26 +36,9 @@ def root():
 def get_status():
     try:
         # ── REAL: uncomment below when watchpower-api is connected ──
-        # data = wp.get_device_status(DEVICE_SN)
-        # return data
-
-        # ── PLACEHOLDER: returns mock until API is wired ──
-        return {
-            "battery_soc": 72,
-            "battery_voltage": 51.2,
-            "battery_current": 8.4,
-            "pv_power": 1840,
-            "pv_voltage": 362.0,
-            "grid_voltage": 221.0,
-            "grid_available": True,
-            "load_power": 950,
-            "load_percent": 32,
-            "output_source": "SBU",
-            "charger_source": "OSO",
-            "inverter_temp": 44,
-            "ac_output_voltage": 220.3,
-            "timestamp": "live"
-        }
+        data = wp.get_device_status(DEVICE_SN)
+        return data
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
