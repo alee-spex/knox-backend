@@ -16,12 +16,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── WatchPower credentials from environment variables ──
 WP_USER   = os.getenv("WP_USER")
 WP_PASS   = os.getenv("WP_PASS")
 DEVICE_SN = os.getenv("DEVICE_SN")
 
-# ── Lazy WatchPower client ──
 _wp = None
 
 def get_wp():
@@ -35,7 +33,10 @@ def get_wp():
         )
     try:
         from watchpower_api import WatchPowerAPI
-        _wp = WatchPowerAPI(WP_USER, WP_PASS)
+        # ── CORRECT usage: no constructor args, login() called separately ──
+        client = WatchPowerAPI()
+        client.login(WP_USER, WP_PASS)
+        _wp = client
         return _wp
     except ImportError:
         raise HTTPException(
@@ -73,27 +74,22 @@ def health():
 
 @app.get("/debug")
 def debug():
-    """
-    Diagnostic endpoint — call this to see exactly what is failing.
-    Returns raw WatchPower API response and any error details.
-    Visit: https://knox-backend-6zht.onrender.com/debug
-    """
+    """Diagnostic endpoint — visit /debug to see exactly what is failing."""
     result = {
         "env": {
-            "WP_USER_set":   bool(WP_USER),
-            "WP_PASS_set":   bool(WP_PASS),
-            "DEVICE_SN":     DEVICE_SN,
+            "WP_USER_set": bool(WP_USER),
+            "WP_PASS_set": bool(WP_PASS),
+            "DEVICE_SN": DEVICE_SN,
         },
         "wp_login": None,
         "raw_status": None,
         "error": None,
         "traceback": None,
     }
-
-    # Step 1: try login
     try:
         from watchpower_api import WatchPowerAPI
-        wp = WatchPowerAPI(WP_USER, WP_PASS)
+        client = WatchPowerAPI()
+        client.login(WP_USER, WP_PASS)
         result["wp_login"] = "success"
     except Exception as e:
         result["wp_login"] = "failed"
@@ -101,10 +97,9 @@ def debug():
         result["traceback"] = traceback.format_exc()
         return result
 
-    # Step 2: try get_device_status and return raw response
     try:
-        raw = wp.get_device_status(DEVICE_SN)
-        result["raw_status"] = raw   # show exactly what the API returns
+        raw = client.get_device_status(DEVICE_SN)
+        result["raw_status"] = raw
     except Exception as e:
         result["error"] = str(e)
         result["traceback"] = traceback.format_exc()
@@ -115,7 +110,7 @@ def debug():
 @app.get("/status")
 def get_status():
     if not DEVICE_SN:
-        raise HTTPException(status_code=503, detail="DEVICE_SN environment variable not set.")
+        raise HTTPException(status_code=503, detail="DEVICE_SN not set.")
     try:
         wp = get_wp()
         data = wp.get_device_status(DEVICE_SN)
@@ -135,9 +130,8 @@ def set_priority(req: PriorityRequest):
         raise HTTPException(status_code=400, detail=f"Invalid output priority: {req.output}")
     if req.charger not in valid_charger:
         raise HTTPException(status_code=400, detail=f"Invalid charger priority: {req.charger}")
-
     if not DEVICE_SN:
-        raise HTTPException(status_code=503, detail="DEVICE_SN environment variable not set.")
+        raise HTTPException(status_code=503, detail="DEVICE_SN not set.")
 
     try:
         wp = get_wp()
