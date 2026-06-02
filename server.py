@@ -1,4 +1,5 @@
 import os
+import traceback
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -20,9 +21,7 @@ WP_USER   = os.getenv("WP_USER")
 WP_PASS   = os.getenv("WP_PASS")
 DEVICE_SN = os.getenv("DEVICE_SN")
 
-# ── Lazy WatchPower client — initialized on first use, not at startup ──
-# This prevents Render deployment failures when the package isn't yet
-# installed or env vars aren't set during the build phase.
+# ── Lazy WatchPower client ──
 _wp = None
 
 def get_wp():
@@ -32,7 +31,7 @@ def get_wp():
     if not WP_USER or not WP_PASS:
         raise HTTPException(
             status_code=503,
-            detail="WatchPower credentials not configured. Set WP_USER and WP_PASS environment variables."
+            detail="WatchPower credentials not configured. Set WP_USER and WP_PASS."
         )
     try:
         from watchpower_api import WatchPowerAPI
@@ -44,7 +43,7 @@ def get_wp():
             detail="watchpower_api package not installed. Add it to requirements.txt."
         )
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"WatchPower connection failed: {e}")
+        raise HTTPException(status_code=503, detail=f"WatchPower login failed: {e}")
 
 
 class PriorityRequest(BaseModel):
@@ -60,6 +59,57 @@ def root():
         "wp_user_set": bool(WP_USER),
         "wp_pass_set": bool(WP_PASS),
     }
+
+
+@app.get("/health")
+def health():
+    return {
+        "ok": True,
+        "user_configured": bool(WP_USER),
+        "device_configured": bool(DEVICE_SN),
+        "wp_client_initialized": _wp is not None,
+    }
+
+
+@app.get("/debug")
+def debug():
+    """
+    Diagnostic endpoint — call this to see exactly what is failing.
+    Returns raw WatchPower API response and any error details.
+    Visit: https://knox-backend-6zht.onrender.com/debug
+    """
+    result = {
+        "env": {
+            "WP_USER_set":   bool(WP_USER),
+            "WP_PASS_set":   bool(WP_PASS),
+            "DEVICE_SN":     DEVICE_SN,
+        },
+        "wp_login": None,
+        "raw_status": None,
+        "error": None,
+        "traceback": None,
+    }
+
+    # Step 1: try login
+    try:
+        from watchpower_api import WatchPowerAPI
+        wp = WatchPowerAPI(WP_USER, WP_PASS)
+        result["wp_login"] = "success"
+    except Exception as e:
+        result["wp_login"] = "failed"
+        result["error"] = str(e)
+        result["traceback"] = traceback.format_exc()
+        return result
+
+    # Step 2: try get_device_status and return raw response
+    try:
+        raw = wp.get_device_status(DEVICE_SN)
+        result["raw_status"] = raw   # show exactly what the API returns
+    except Exception as e:
+        result["error"] = str(e)
+        result["traceback"] = traceback.format_exc()
+
+    return result
 
 
 @app.get("/status")
@@ -99,13 +149,3 @@ def set_priority(req: PriorityRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/health")
-def health():
-    return {
-        "ok": True,
-        "user_configured": bool(WP_USER),
-        "device_configured": bool(DEVICE_SN),
-        "wp_client_initialized": _wp is not None,
-    }
